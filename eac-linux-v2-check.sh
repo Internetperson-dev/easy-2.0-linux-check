@@ -1,3 +1,46 @@
+
+# Differnet instructions for grub and limine - see https://wiki.cachyos.org/configuration/secure_boot_setup/
+# Ensure sudo sbctl status is 1) isntalled 2) reports setup mode. 
+# If setup mode is not reproted, ask user to press enter to reboot into bios and ask to clear secure boot keys on (report motherboard wtih sudo dmidecode -s baseboard-manufacturer
+# sudo dmidecode -s baseboard-product-name and than try again)
+
+
+# The flow should go like ensure sbctl is installed, do checkes, for secure boot check with sudo, tell user to clear keys, reboot, run script again -> setup mode -> add keys -> reoboot again and enable windwos uefi mode
+
+# The user should have to specific fixes, stuff should be backed up first. 
+# sudo cp -a /etc/default/limine /etc/default/limine.backup 2>/dev/null || true
+sudo cp -a /boot/limine.conf /boot/limine.conf.backup 2>/dev/null || true
+# 
+# cat /etc/default/limine 2>/dev/null
+# sudo grep -E '^(comment|cmdline|protocol):' /boot/limine.conf
+
+# Also do for grub and systemd boot, but do not apply fixes for them. I do not want to publish not only mostly AI generated code, but untested AI generated code.
+
+# This is subject to change. I just want day 0 support for Fortnite. 
+
+
+# sudo limine-mkinitcpio
+
+# sudo grep 'cmdline:' /boot/limine.conf | head -4
+
+# Enable lockdown now
+# echo integrity | sudo tee /sys/kernel/security/lockdown
+# cat /sys/kernel/security/lockdown
+# Disable kexec
+# sudo sysctl -w kernel.kexec_load_disabled=1
+# Disable kexec on future boots
+# echo 'kernel.kexec_load_disabled = 1' | sudo tee /etc/sysctl.d/99-eac-hardening.conf
+# check
+# cat /proc/sys/kernel/kexec_load_disabled
+# add lockdown=integrity to future boots
+sudo sed -i '/^KERNEL_CMDLINE\[default\]/ s/"$/ lockdown=integrity"/' /etc/default/limine
+sudo limine-mkinitcpio
+
+
+# The CatchyOS people will likely sort kernel signing later. 
+# For now laugh at this. https://www.youtube.com/watch?v=UnktCDi-BVs
+
+
 #!/usr/bin/env bash
 # eac-linux-v2-check.sh
 # Read-only, best-effort EAC Linux v2 requirement diagnostics.
