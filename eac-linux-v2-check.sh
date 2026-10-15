@@ -1,28 +1,35 @@
-
-# Differnet instructions for grub and limine - see https://wiki.cachyos.org/configuration/secure_boot_setup/
-# Ensure sudo sbctl status is 1) isntalled 2) reports setup mode. 
-# If setup mode is not reproted, ask user to press enter to reboot into bios and ask to clear secure boot keys on (report motherboard wtih sudo dmidecode -s baseboard-manufacturer
-# sudo dmidecode -s baseboard-product-name and than try again)
-
-
-# The flow should go like ensure sbctl is installed, do checkes, for secure boot check with sudo, tell user to clear keys, reboot, run script again -> setup mode -> add keys -> reoboot again and enable windwos uefi mode
-
-# The user should have to specific fixes, stuff should be backed up first. 
+#!/usr/bin/env bash
+# eac-linux-v2-check.sh
+# Best-effort EAC Linux v2 requirement diagnostics.
+# Supports Limine, GRUB, systemd-boot and other EFI/Linux boot arrangements.
+# The checks are read-only. Run as a normal user; sudo is optional for extra dmesg
+# visibility. At the end an *opt-in* fix step is offered for Limine only, and it
+# never runs without an explicit confirmation at the prompt.
+#
+# Different instructions for grub and limine - see https://wiki.cachyos.org/configuration/secure_boot_setup/
+# Ensure sudo sbctl status is 1) installed 2) reports setup mode.
+# If setup mode is not reported, ask user to press enter to reboot into bios and ask to clear secure boot keys on (report motherboard with sudo dmidecode -s baseboard-manufacturer
+# sudo dmidecode -s baseboard-product-name and then try again)
+#
+#
+# The flow should go like ensure sbctl is installed, do checks, for secure boot check with sudo, tell user to clear keys, reboot, run script again -> setup mode -> add keys -> reboot again and enable windows uefi mode
+#
+# The user should have to specific fixes, stuff should be backed up first.
 # sudo cp -a /etc/default/limine /etc/default/limine.backup 2>/dev/null || true
-sudo cp -a /boot/limine.conf /boot/limine.conf.backup 2>/dev/null || true
-# 
+# sudo cp -a /boot/limine.conf /boot/limine.conf.backup 2>/dev/null || true
+#
 # cat /etc/default/limine 2>/dev/null
 # sudo grep -E '^(comment|cmdline|protocol):' /boot/limine.conf
-
+#
 # Also do for grub and systemd boot, but do not apply fixes for them. I do not want to publish not only mostly AI generated code, but untested AI generated code.
-
-# This is subject to change. I just want day 0 support for Fortnite. 
-
-
+#
+# This is subject to change. I just want day 0 support for Fortnite.
+#
+#
 # sudo limine-mkinitcpio
-
+#
 # sudo grep 'cmdline:' /boot/limine.conf | head -4
-
+#
 # Enable lockdown now
 # echo integrity | sudo tee /sys/kernel/security/lockdown
 # cat /sys/kernel/security/lockdown
@@ -33,23 +40,18 @@ sudo cp -a /boot/limine.conf /boot/limine.conf.backup 2>/dev/null || true
 # check
 # cat /proc/sys/kernel/kexec_load_disabled
 # add lockdown=integrity to future boots
-sudo sed -i '/^KERNEL_CMDLINE\[default\]/ s/"$/ lockdown=integrity"/' /etc/default/limine
-sudo limine-mkinitcpio
-
-
-# The CatchyOS people will likely sort kernel signing later. 
+# sudo sed -i '/^KERNEL_CMDLINE\[default\]/ s/"$/ lockdown=integrity"/' /etc/default/limine
+# sudo limine-mkinitcpio
+#
+#
+# The CachyOS people will likely sort kernel signing later.
 # For now laugh at this. https://www.youtube.com/watch?v=UnktCDi-BVs
-
-
-#!/usr/bin/env bash
-# eac-linux-v2-check.sh
-# Read-only, best-effort EAC Linux v2 requirement diagnostics.
-# Supports Limine, GRUB, systemd-boot and other EFI/Linux boot arrangements.
-# No settings are changed. Run as a normal user; sudo is optional for extra dmesg visibility.
+#
 set -u
 export LC_ALL=C
 
 PASS=0; FAIL=0; WARN=0; INFO=0
+FIX_LOCKDOWN=0; FIX_KEXEC=0; FIX_BPF=0; FIX_IOMMU=0
 TMPDIR_EAC="$(mktemp -d 2>/dev/null || printf '/tmp/eac-check-%s' "$$")"
 mkdir -p "$TMPDIR_EAC" 2>/dev/null || true
 trap 'rm -rf "$TMPDIR_EAC"' EXIT
@@ -121,6 +123,44 @@ else
     echo "Bootloader evidence: not identified (configuration may be on another EFI/system partition)."
 fi
 echo "Note: installed files or EFI entries show evidence, not necessarily which loader launched this exact boot."
+
+# Determine the primary bootloader that likely booted this system.
+# Match the BootCurrent entry itself: the line looks like "Boot0000* Limine" or
+# "Boot0000  Limine", so make the "*" optional and the label match case-insensitive.
+PRIMARY_BOOTLOADER="unknown"
+if have efibootmgr; then
+    BOOT_CURRENT="$(efibootmgr 2>/dev/null | sed -n 's/^BootCurrent: *//p' | head -1)"
+    if [ -n "$BOOT_CURRENT" ]; then
+        EFI_BOOT_ENTRY="$(efibootmgr 2>/dev/null | grep -E "^Boot${BOOT_CURRENT}\*?[[:space:]]" | head -1)"
+        if printf '%s' "$EFI_BOOT_ENTRY" | grep -Eqi 'limine'; then
+            PRIMARY_BOOTLOADER="limine"
+        elif printf '%s' "$EFI_BOOT_ENTRY" | grep -Eqi 'grub'; then
+            PRIMARY_BOOTLOADER="grub"
+        elif printf '%s' "$EFI_BOOT_ENTRY" | grep -Eqi 'Linux Boot Manager|systemd-boot'; then
+            PRIMARY_BOOTLOADER="systemd-boot"
+        fi
+    fi
+fi
+if [ "$PRIMARY_BOOTLOADER" = "unknown" ]; then
+    if [ -e /boot/limine.conf ] || [ -e /etc/limine.conf ] || [ -e /boot/limine/limine.conf ]; then
+        PRIMARY_BOOTLOADER="limine"
+    elif [ -d /boot/grub ] || [ -d /boot/grub2 ] || [ -e /etc/default/grub ]; then
+        PRIMARY_BOOTLOADER="grub"
+    elif [ -d /boot/systemd-boot ] || [ -d /boot/loader ]; then
+        PRIMARY_BOOTLOADER="systemd-boot"
+    fi
+fi
+# Last resort: infer from any collected bootloader evidence. /boot is often not
+# readable as a normal user, so EFI-entry evidence may be all we have.
+if [ "$PRIMARY_BOOTLOADER" = "unknown" ] && [ -n "$BOOTLOADERS" ]; then
+    BL_LC="$(printf '%s' "$BOOTLOADERS" | tr '[:upper:]' '[:lower:]')"
+    case "$BL_LC" in
+        *limine*) PRIMARY_BOOTLOADER="limine";;
+        *systemd-boot*|*"linux boot manager"*) PRIMARY_BOOTLOADER="systemd-boot";;
+        *grub*) PRIMARY_BOOTLOADER="grub";;
+    esac
+fi
+echo "Detected primary bootloader: $PRIMARY_BOOTLOADER"
 
 section "1. Signed kernel and kernel modules"
 if [ "$SIG_ENFORCE" = "Y" ] || [ "$SIG_ENFORCE" = "1" ]; then
@@ -217,10 +257,9 @@ result WARN "Secure Boot trusted keys" "Even when enabled, a generic script cann
 section "4. Measured boot"
 EVENT_LOG_FOUND=0
 for f in /sys/kernel/security/tpm0/binary_bios_measurements \
-         /sys/kernel/security/tpm0/ascii_bios_measurements \
-         /sys/kernel/security/tpm1/binary_bios_measurements \
-         /sys/kernel/security/tpm1/ascii_bios_measurements \
-         /sys/kernel/security/tpm0/binary_bios_measurements; do
+          /sys/kernel/security/tpm0/ascii_bios_measurements \
+          /sys/kernel/security/tpm1/binary_bios_measurements \
+          /sys/kernel/security/tpm1/ascii_bios_measurements; do
     if [ -r "$f" ]; then
         EVENT_LOG_FOUND=1
         echo "Readable TPM event log: $f ($(wc -c < "$f" 2>/dev/null | tr -d ' ') bytes)"
@@ -243,7 +282,7 @@ result WARN "Measured boot completeness" "Presence of an event-log interface doe
 section "5. IOMMU"
 IOMMU_OFF=0; IOMMU_PT=0
 if printf '%s\n' "$CMDLINE" | grep -Eq '(^| )(intel_iommu=off|amd_iommu=off|iommu=off)( |$)'; then IOMMU_OFF=1; fi
-if printf '%s\n' "$CMDLINE" | grep -Eq '(^| )(iommu=pt|amd_iommu=pt|intel_iommu=on,igfx_off)( |$)'; then IOMMU_PT=1; fi
+if printf '%s\n' "$CMDLINE" | grep -Eq '(^| )(iommu=pt|intel_iommu=pt|amd_iommu=pt)( |$)'; then IOMMU_PT=1; fi
 if [ "$IOMMU_OFF" -eq 1 ]; then
     result FAIL "IOMMU kernel parameters" "Kernel command line explicitly disables IOMMU."
 elif [ "$IOMMU_PT" -eq 1 ]; then
@@ -273,6 +312,12 @@ if [ -d /sys/kernel/iommu_groups ]; then
 else
     result WARN "IOMMU groups" "No /sys/kernel/iommu_groups directory; IOMMU may be disabled, unsupported, or not exposed."
 fi
+# Track whether IOMMU fix is needed (only if explicitly disabled or no evidence of activation)
+if [ "$IOMMU_OFF" -eq 1 ]; then
+    FIX_IOMMU=1
+elif [ -z "$IOMMU_LINES" ] && [ ! -d /sys/kernel/iommu_groups ]; then
+    FIX_IOMMU=1
+fi
 
 section "6. Kernel lockdown integrity mode"
 if [ -n "$LOCKDOWN" ]; then
@@ -289,6 +334,9 @@ if [ -n "$LOCKDOWN" ]; then
 else
     result WARN "Lockdown integrity" "Lockdown sysfs interface unavailable; kernel support/status could not be confirmed."
 fi
+if ! printf '%s' "$LOCKDOWN" | grep -q '\[integrity\]'; then
+    FIX_LOCKDOWN=1
+fi
 if printf '%s\n' "$CMDLINE" | grep -Eq '(^| )lockdown='; then
     echo "Lockdown-related command-line argument: $(printf '%s\n' "$CMDLINE" | tr ' ' '\n' | grep '^lockdown=' | paste -sd ' ' -)"
 else
@@ -304,10 +352,15 @@ elif [ "$KEXEC_DISABLED" = "0" ]; then
 else
     result WARN "Kexec load lockout" "Runtime sysctl unavailable."
 fi
-if printf '%s\n' "$CMDLINE" | grep -Eq '(^| )kexec_load_disabled=1( |$)'; then
-    echo "Kernel command line requests kexec_load_disabled=1."
+if [ "$KEXEC_DISABLED" != "1" ]; then
+    FIX_KEXEC=1
+fi
+# kexec is locked out through the kernel.kexec_load_disabled sysctl, not through a
+# kernel command-line option, so look for a persistent sysctl setting instead.
+if grep -Rqs '^[[:space:]]*kernel\.kexec_load_disabled[[:space:]]*=[[:space:]]*1' /etc/sysctl.conf /etc/sysctl.d 2>/dev/null; then
+    echo "kexec appears to be disabled persistently via sysctl configuration."
 else
-    echo "No kexec_load_disabled=1 parameter detected in the running command line."
+    echo "No persistent kernel.kexec_load_disabled=1 found in /etc/sysctl.conf or /etc/sysctl.d."
 fi
 if have systemctl; then
     KEXEC_UNITS="$(systemctl is-enabled kexec-load.service kexec.service 2>/dev/null || true)"
@@ -331,10 +384,104 @@ if [ -r /proc/config.gz ]; then
 elif [ -r "/boot/config-$(uname -r)" ]; then
     grep -E '^CONFIG_BPF_LSM=' "/boot/config-$(uname -r)" 2>/dev/null || true
 fi
+# Track whether BPF LSM fix is needed
+if [ -n "$LSM_LIST" ] && ! contains_word "$LSM_LIST" bpf; then
+    FIX_BPF=1
+elif [ -z "$LSM_LIST" ]; then
+    FIX_BPF=1
+fi
 
 printf '\n\n================ Summary ================\n'
 printf 'PASS: %d   FAIL: %d   WARN: %d   INFO: %d\n' "$PASS" "$FAIL" "$WARN" "$INFO"
 echo "FAIL = evidence conflicts with the stated requirement."
 echo "WARN = not proven or needs manual validation; not necessarily a failure."
 echo "INFO = useful context, not a pass/fail judgment."
-echo "This script does not alter the system or certify EAC compatibility."
+echo "The checks are read-only; an opt-in Limine fix step (with backups) may follow."
+echo "This script does not certify EAC compatibility."
+
+# Report every actionable gap so nothing is silently dropped.
+if [ "$FIX_LOCKDOWN" -eq 1 ] || [ "$FIX_KEXEC" -eq 1 ] || [ "$FIX_BPF" -eq 1 ] || [ "$FIX_IOMMU" -eq 1 ]; then
+    echo ""
+    echo "=== Detected gaps ==="
+    [ "$FIX_LOCKDOWN" -eq 1 ] && echo "  - Kernel lockdown integrity mode is not active."
+    [ "$FIX_KEXEC" -eq 1 ] && echo "  - kexec is not locked out (kernel.kexec_load_disabled != 1)."
+    [ "$FIX_BPF" -eq 1 ] && echo "  - BPF LSM is not confirmed active (kernel CONFIG_BPF_LSM and 'bpf' in the lsm= parameter)."
+    [ "$FIX_IOMMU" -eq 1 ] && echo "  - IOMMU activation is not confirmed (firmware VT-d/AMD-Vi plus kernel IOMMU support)."
+fi
+
+# Offer automatic fixes only when something is actually actionable, and only for Limine.
+if [ "$FIX_LOCKDOWN" -eq 1 ] || [ "$FIX_KEXEC" -eq 1 ]; then
+    if [ "$PRIMARY_BOOTLOADER" != "limine" ]; then
+        echo ""
+        echo "Detected primary bootloader: $PRIMARY_BOOTLOADER"
+        echo "Automatic fixes are only offered for Limine; configure $PRIMARY_BOOTLOADER manually."
+    else
+        echo ""
+        echo "=== Suggested fixes for Limine ==="
+        [ "$FIX_LOCKDOWN" -eq 1 ] && echo "  [ ] Add lockdown=integrity to the kernel cmdline in /etc/default/limine"
+        [ "$FIX_KEXEC" -eq 1 ] && echo "  [ ] Disable kexec: set kernel.kexec_load_disabled=1"
+        echo ""
+        if ! have sudo; then
+            echo "sudo is not available; cannot apply fixes."
+        elif [ -t 0 ]; then
+            APPLY_FIXES="n"
+            read -rp "Apply these fixes? [y/N] " APPLY_FIXES || APPLY_FIXES="n"
+        else
+            APPLY_FIXES="n"
+            echo "(Non-interactive mode; no changes applied.)"
+        fi
+        case "$APPLY_FIXES" in
+            [Yy]*)
+                # Back up everything first; abort the whole fix if any backup fails.
+                BACKUP_OK=1
+                STAMP="$(date +%Y%m%d-%H%M%S 2>/dev/null || printf manual)"
+                for cfg in /etc/default/limine /boot/limine.conf; do
+                    [ -e "$cfg" ] || continue
+                    if sudo cp -a "$cfg" "$cfg.eac-backup-$STAMP"; then
+                        echo "  + Backed up $cfg -> $cfg.eac-backup-$STAMP"
+                    else
+                        echo "  ! Failed to back up $cfg; refusing to modify anything."
+                        BACKUP_OK=0
+                        break
+                    fi
+                done
+                if [ "$BACKUP_OK" -eq 1 ]; then
+                    echo "Applying fixes..."
+                    if [ "$FIX_LOCKDOWN" -eq 1 ]; then
+                        if [ -e /etc/default/limine ]; then
+                            if grep -Eq '^KERNEL_CMDLINE\[default\]=.*lockdown=integrity' /etc/default/limine; then
+                                echo "  = lockdown=integrity already present in /etc/default/limine"
+                            else
+                                sudo sed -i '/^KERNEL_CMDLINE\[default\]/ s/"$/ lockdown=integrity"/' /etc/default/limine
+                                echo "  + Added lockdown=integrity to /etc/default/limine"
+                            fi
+                        else
+                            echo "  ! /etc/default/limine not found; cannot add lockdown=integrity"
+                        fi
+                    fi
+                    if [ "$FIX_KEXEC" -eq 1 ]; then
+                        printf 'kernel.kexec_load_disabled = 1\n' | sudo tee /etc/sysctl.d/99-eac-hardening.conf >/dev/null
+                        sudo sysctl -w kernel.kexec_load_disabled=1 >/dev/null 2>&1 || true
+                        echo "  + Disabled kexec (runtime and /etc/sysctl.d/99-eac-hardening.conf)"
+                    fi
+                    if [ "$FIX_LOCKDOWN" -eq 1 ]; then
+                        if have limine-mkinitcpio; then
+                            echo "  + Regenerating initramfs..."
+                            sudo limine-mkinitcpio
+                        else
+                            echo "  ! limine-mkinitcpio not found; regenerate the initramfs manually"
+                        fi
+                    fi
+                    echo "Done. Reboot to apply changes."
+                fi
+                ;;
+            *)
+                echo "No changes applied."
+                ;;
+        esac
+    fi
+fi
+
+# Non-zero exit when a hard requirement is missing, so callers can script against it.
+[ "$FAIL" -gt 0 ] && exit 1
+exit 0

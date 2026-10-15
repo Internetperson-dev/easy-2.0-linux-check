@@ -1,6 +1,23 @@
 Linux Anti-cheats have been rough for the longest time.
 
-Epic Games seek to improve thier Easy Anti Cheat (Or Epic Anti Cheat) for Fortnite coming to Linux. 
+Epic Games seek to improve their Easy Anti Cheat (or Epic Anti Cheat) for Fortnite coming to Linux. 
+
+They have said these requirements are subject to change, but this script should check for them. 
+
+## Usage
+
+```sh
+chmod +x eac-linux-v2-check.sh
+./eac-linux-v2-check.sh
+```
+
+The checks are read-only and work as a normal user. `sudo` may be used for extra
+`dmesg` visibility. If gaps are found and a Limine bootloader is detected, the
+script offers an interactive, opt-in fix step that backs up configuration first
+and never runs without explicit confirmation. It exits non-zero when a hard
+requirement is missing.
+
+
 
 ```
  Let’s go through the system requirements for EAC Linux v2 one by one. We expect to iterate on these requirements over time, and we appreciate feedback from developers and distribution maintainers to help refine them.
