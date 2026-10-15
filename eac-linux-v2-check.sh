@@ -223,6 +223,21 @@ fi
 
 section "3. Secure Boot"
 SB_STATE="unknown"
+SB_VENDOR_KEYS=""
+# sbctl is the tool the CachyOS/Secure Boot workflow is built around; it reports
+# state and vendor keys without root.
+if have sbctl; then
+    SBCTL_OUT="$(sbctl status 2>/dev/null || true)"
+    if [ -n "$SBCTL_OUT" ]; then
+        echo "sbctl:"
+        printf '%s\n' "$SBCTL_OUT" | sed 's/^/  /'
+        if printf '%s' "$SBCTL_OUT" | grep -Eqi 'Secure Boot:.*Enabled'; then SB_STATE="enabled"
+        elif printf '%s' "$SBCTL_OUT" | grep -Eqi 'Secure Boot:.*Disabled'; then SB_STATE="disabled"; fi
+        SB_VENDOR_KEYS="$(printf '%s' "$SBCTL_OUT" | sed -n 's/^Vendor Keys:[[:space:]]*//p' | head -1)"
+    fi
+else
+    echo "sbctl: not installed"
+fi
 if have mokutil; then
     MOK_OUT="$(mokutil --sb-state 2>&1 || true)"
     echo "mokutil: $MOK_OUT"
@@ -252,23 +267,81 @@ if have mokutil; then
     ENROLLED="$(mokutil --list-enrolled 2>/dev/null | grep -E 'Subject:|Issuer:|SHA1 Fingerprint:|SHA256 Fingerprint:' | head -n 12 || true)"
     [ -n "$ENROLLED" ] && printf 'Enrolled MOK certificate metadata (sample):\n%s\n' "$ENROLLED"
 fi
-result WARN "Secure Boot trusted keys" "Even when enabled, a generic script cannot reliably decide whether all enrolled firmware/MOK keys qualify as EAC well-known keys."
+if [ -n "$SB_VENDOR_KEYS" ]; then
+    echo "Firmware vendor keys reported by sbctl: $SB_VENDOR_KEYS"
+fi
+result WARN "Secure Boot trusted keys" "Even when enabled, a generic script cannot reliably decide whether all enrolled firmware/MOK keys qualify as EAC well-known keys.${SB_VENDOR_KEYS:+ sbctl reports vendor keys: $SB_VENDOR_KEYS.}"
 
 section "4. Measured boot"
 EVENT_LOG_FOUND=0
+EVENT_LOG_PATH=""
+EVENT_LOG_UNREADABLE=""
 for f in /sys/kernel/security/tpm0/binary_bios_measurements \
           /sys/kernel/security/tpm0/ascii_bios_measurements \
           /sys/kernel/security/tpm1/binary_bios_measurements \
           /sys/kernel/security/tpm1/ascii_bios_measurements; do
     if [ -r "$f" ]; then
         EVENT_LOG_FOUND=1
+        EVENT_LOG_PATH="$f"
         echo "Readable TPM event log: $f ($(wc -c < "$f" 2>/dev/null | tr -d ' ') bytes)"
+    elif [ -e "$f" ]; then
+        # Present but not readable by this user (typically root:tss, 0640).
+        EVENT_LOG_UNREADABLE="$f"
     fi
 done
+# A present-but-unreadable log is usually a permissions issue, not a missing
+# measurement. Try a non-interactive sudo read so we do not prompt here.
+if [ "$EVENT_LOG_FOUND" -eq 0 ] && [ -n "$EVENT_LOG_UNREADABLE" ] && have sudo; then
+    SUDO_WC="$(sudo -n wc -c "$EVENT_LOG_UNREADABLE" 2>/dev/null | awk '{print $1}' | head -1)"
+    if [[ "$SUDO_WC" =~ ^[0-9]+$ ]]; then
+        EVENT_LOG_FOUND=1
+        EVENT_LOG_PATH="$EVENT_LOG_UNREADABLE"
+        echo "TPM event log present and read via sudo: $EVENT_LOG_UNREADABLE ($SUDO_WC bytes)"
+    fi
+fi
 if [ "$EVENT_LOG_FOUND" -eq 1 ]; then
-    result PASS "TPM event-log interface" "At least one standard TPM event-log path is readable. The contents still need parsing/validation to prove all expected measurements occurred."
+    result PASS "TPM event-log interface" "A TPM event log is present and readable. The contents still need parsing/validation to prove all expected measurements occurred."
+elif [ -n "$EVENT_LOG_UNREADABLE" ]; then
+    result WARN "TPM event-log interface" "A TPM event log exists at $EVENT_LOG_UNREADABLE but is not readable by this user (root:tss). Re-run with sudo to confirm its contents."
 else
-    result WARN "TPM event-log interface" "No readable standard TPM event-log path found. This may be due to securityfs not being mounted, firmware/kernel exposure, or missing measurements."
+    result WARN "TPM event-log interface" "No standard TPM event-log path found. This may be due to securityfs not being mounted, firmware/kernel exposure, or missing measurements."
+fi
+
+# Deeper validation with tpm2-tools, when installed. These are optional: the sysfs
+# interface above remains the primary signal, but PCR values and a parsed event log
+# are stronger evidence that measurements were actually performed.
+if have tpm2_pcrread; then
+    PCR_OUT="$(tpm2_pcrread sha256:0,1,2,3,4,5,6,7 2>/dev/null || true)"
+    if [ -n "$PCR_OUT" ]; then
+        echo "TPM2 PCR values (sha256, PCR 0-7):"
+        printf '%s\n' "$PCR_OUT" | sed 's/^/  /'
+        # tpm2_pcrread prints "<index>  : <hex>"; a PCR of all zeros means that
+        # boot stage extended nothing (often a missing measurement).
+        ZERO_PCRS="$(printf '%s\n' "$PCR_OUT" \
+            | awk -F: '/^[[:space:]]*[0-9]+[[:space:]]*:/ { v=$NF; gsub(/[[:space:]xX]/,"",v); i=$1; gsub(/[[:space:]]/,"",i); if (v ~ /^0+$/) z = z (z ? ", " : "") i } END { print z }')"
+        if [ -n "$ZERO_PCRS" ]; then
+            result WARN "TPM PCR population" "PCR(s) $ZERO_PCRS read as all-zero, suggesting those boot stages were not measured."
+        else
+            result PASS "TPM PCR population" "TPM2 PCRs 0-7 report non-zero values, consistent with firmware and boot measurement (PCR7 reflects the Secure Boot policy)."
+        fi
+    else
+        result WARN "TPM PCR population" "tpm2_pcrread is installed but returned no data; the TPM may be inaccessible or tss group permissions may be missing."
+    fi
+else
+    echo "tpm2_pcrread (tpm2-tools) not installed; skipping PCR value validation."
+fi
+
+if have tpm2_eventlog; then
+    if [ -n "$EVENT_LOG_PATH" ] && [ -r "$EVENT_LOG_PATH" ]; then
+        EVENT_COUNT="$(tpm2_eventlog "$EVENT_LOG_PATH" 2>/dev/null | grep -c 'EventNum:' || true)"
+        if [[ "$EVENT_COUNT" =~ ^[0-9]+$ ]] && [ "$EVENT_COUNT" -gt 0 ]; then
+            result PASS "TPM event-log parse" "tpm2_eventlog parsed $EVENT_COUNT measurement events from $EVENT_LOG_PATH."
+        else
+            result WARN "TPM event-log parse" "tpm2_eventlog could not parse measurement events from $EVENT_LOG_PATH."
+        fi
+    else
+        echo "tpm2_eventlog is installed but no readable event log is available; skipping parse."
+    fi
 fi
 if printf '%s' "$BOOTCTL_STATUS" | grep -Eqi 'TPM2|measured|PCR'; then
     echo "systemd boot status mentions TPM/measured-boot information."

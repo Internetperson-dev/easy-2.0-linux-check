@@ -17,6 +17,10 @@ script offers an interactive, opt-in fix step that backs up configuration first
 and never runs without explicit confirmation. It exits non-zero when a hard
 requirement is missing.
 
+For stronger measured-boot evidence, install `tpm2-tools`: when `tpm2_pcrread`
+and `tpm2_eventlog` are available the script validates TPM PCR values (detecting
+unmeasured/all-zero PCRs) and parses the boot event log.
+
 
 
 ```
