@@ -197,15 +197,24 @@ EAC_STATUS_TMP="$TMPDIR_EAC/eac-status"
 if have curl; then
     if curl -fsSL "$EAC_STATUS_URL" -o "$EAC_STATUS_TMP" 2>/dev/null; then
         chmod +x "$EAC_STATUS_TMP" 2>/dev/null || true
-        # Source (run) the fetched script as a subprocess so it cannot exit this script.
-        "$EAC_STATUS_TMP" || true
+        # Run the fetched script as a subprocess so it cannot exit this script.
+        # eac-status requires root, so elevate with sudo when needed.
+        if [ "$(id -u)" -eq 0 ]; then
+            "$EAC_STATUS_TMP" || true
+        else
+            sudo "$EAC_STATUS_TMP" || true
+        fi
     else
         printf '\033[31mFailed to fetch remote eac-status placeholder.\033[0m\n'
     fi
 elif have wget; then
     if wget -qO "$EAC_STATUS_TMP" "$EAC_STATUS_URL" 2>/dev/null; then
         chmod +x "$EAC_STATUS_TMP" 2>/dev/null || true
-        "$EAC_STATUS_TMP" || true
+        if [ "$(id -u)" -eq 0 ]; then
+            "$EAC_STATUS_TMP" || true
+        else
+            sudo "$EAC_STATUS_TMP" || true
+        fi
     else
         printf '\033[31mFailed to fetch remote eac-status placeholder.\033[0m\n'
     fi
