@@ -191,6 +191,29 @@ fi
 # from the upstream CachyOS-Settings repository. This is a placeholder and must
 # be replaced with a local implementation.
 # Reference: https://github.com/CachyOS/CachyOS-Settings/pull/283
+# eac-status requires sbverify (sbsigntools) and tpm2-tools; prompt to install
+# them with pacman if they are missing.
+if ! have sbverify || ! have tpm2_eventlog; then
+    printf '\033[31mMissing dependencies for eac-status: sbsigntools and/or tpm2-tools.\033[0m\n'
+    if have pacman; then
+        if [ -t 0 ]; then
+            read -rp "Install sbsigntools and tpm2-tools with pacman now? [y/N] " INSTALL_DEPS || INSTALL_DEPS="n"
+            case "$INSTALL_DEPS" in
+                [Yy]*)
+                    sudo pacman -S --needed sbsigntools tpm2-tools || true
+                    ;;
+                *)
+                    echo "Skipping dependency installation; eac-status may fail."
+                    ;;
+            esac
+        else
+            echo "Non-interactive: run 'sudo pacman -S --needed sbsigntools tpm2-tools' manually."
+        fi
+    else
+        echo "pacman not found; install sbsigntools and tpm2-tools manually."
+    fi
+fi
+
 printf '\033[31mWARNING: sourcing remote eac-status placeholder from https://github.com/CachyOS/CachyOS-Settings/raw/5d07459935997c33252a59c06b022de20d071a27/usr/bin/eac-status; this is a placeholder and should be changed.\033[0m\n'
 EAC_STATUS_URL="https://github.com/CachyOS/CachyOS-Settings/raw/5d07459935997c33252a59c06b022de20d071a27/usr/bin/eac-status"
 EAC_STATUS_TMP="$TMPDIR_EAC/eac-status"
