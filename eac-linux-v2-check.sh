@@ -162,6 +162,40 @@ if [ "$PRIMARY_BOOTLOADER" = "unknown" ] && [ -n "$BOOTLOADERS" ]; then
 fi
 echo "Detected primary bootloader: $PRIMARY_BOOTLOADER"
 
+section "0. CachyOS EAC kernel (linux-cachyos-eac)"
+# Reference for this check / the dedicated EAC kernel & boot entry:
+# https://github.com/CachyOS/wiki/pull/650/changes/cea244a7712a6e1248d0afdd51e6b95a729a801c
+# NOTE: linux-cachyos-eac does not exist yet as a CachyOS package, so this
+# check cannot pass until that package is published. It is kept here so that
+# support lights up automatically once the package ships.
+EAC_KERNEL_RUNNING=0
+if printf '%s' "$(uname -r)" | grep -Eq 'cachyos-eac'; then EAC_KERNEL_RUNNING=1; fi
+EAC_PKG_INSTALLED=0
+if have pacman; then
+    if pacman -Q linux-cachyos-eac >/dev/null 2>&1; then EAC_PKG_INSTALLED=1; fi
+fi
+EAC_KERNEL_IMAGE=0
+[ -e /boot/vmlinuz-linux-cachyos-eac ] && EAC_KERNEL_IMAGE=1
+echo "Running kernel: $(uname -r)"
+echo "linux-cachyos-eac package installed: $([ "$EAC_PKG_INSTALLED" -eq 1 ] && echo yes || echo no)"
+echo "EAC kernel image present: $([ "$EAC_KERNEL_IMAGE" -eq 1 ] && echo yes || echo no)"
+if [ "$EAC_KERNEL_RUNNING" -eq 1 ]; then
+    result PASS "CachyOS EAC kernel" "Running kernel is linux-cachyos-eac."
+elif [ "$EAC_PKG_INSTALLED" -eq 1 ] || [ "$EAC_KERNEL_IMAGE" -eq 1 ]; then
+    result WARN "CachyOS EAC kernel" "linux-cachyos-eac is present but not the running kernel; reboot into the EAC boot entry to use it."
+else
+    result WARN "CachyOS EAC kernel" "linux-cachyos-eac is not installed/running. This package does not exist yet as a CachyOS package, so this check cannot pass until it is published. See https://github.com/CachyOS/wiki/pull/650/changes/cea244a7712a6e1248d0afdd51e6b95a729a801c"
+fi
+
+# Check for the CachyOS eac-status helper script. It is not implemented yet, so
+# this check is expected to FAIL until CachyOS-Settings ships it.
+# Reference: https://github.com/CachyOS/CachyOS-Settings/pull/283
+if have eac-status; then
+    result PASS "eac-status script" "eac-status is installed and available."
+else
+    result FAIL "eac-status script" "eac-status is not available; it has not been implemented yet. See https://github.com/CachyOS/CachyOS-Settings/pull/283"
+fi
+
 section "1. Signed kernel and kernel modules"
 if [ "$SIG_ENFORCE" = "Y" ] || [ "$SIG_ENFORCE" = "1" ]; then
     result PASS "Module signature enforcement" "Kernel parameter sig_enforce=$SIG_ENFORCE."
