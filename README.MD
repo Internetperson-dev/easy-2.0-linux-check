@@ -4,23 +4,14 @@ Epic Games seek to improve their Easy Anti Cheat (or Epic Anti Cheat) for Fortni
 
 They have said these requirements are subject to change, but this script should check for them. 
 
+It uses [beta](https://github.com/CachyOS/CachyOS-Settings/blob/5d07459935997c33252a59c06b022de20d071a27/usr/bin/eac-status) [CatchyOS](https://github.com/CachyOS/wiki/pull/650) scripts right now.
+
 ## Usage
 
 ```sh
 chmod +x eac-linux-v2-check.sh
 ./eac-linux-v2-check.sh
 ```
-
-The checks are read-only and work as a normal user. `sudo` may be used for extra
-`dmesg` visibility. If gaps are found and a Limine bootloader is detected, the
-script offers an interactive, opt-in fix step that backs up configuration first
-and never runs without explicit confirmation. It exits non-zero when a hard
-requirement is missing.
-
-For stronger measured-boot evidence, install `tpm2-tools`: when `tpm2_pcrread`
-and `tpm2_eventlog` are available the script validates TPM PCR values (detecting
-unmeasured/all-zero PCRs) and parses the boot event log.
-
 
 
 ```
