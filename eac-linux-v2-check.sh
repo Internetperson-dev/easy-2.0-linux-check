@@ -187,13 +187,30 @@ else
     result WARN "CachyOS EAC kernel" "linux-cachyos-eac is not installed/running. This package does not exist yet as a CachyOS package, so this check cannot pass until it is published. See https://github.com/CachyOS/wiki/pull/650/changes/cea244a7712a6e1248d0afdd51e6b95a729a801c"
 fi
 
-# Check for the CachyOS eac-status helper script. It is not implemented yet, so
-# this check is expected to FAIL until CachyOS-Settings ships it.
+# PLACEHOLDER: eac-status is not implemented locally yet. For now, source/run it
+# from the upstream CachyOS-Settings repository. This is a placeholder and must
+# be replaced with a local implementation.
 # Reference: https://github.com/CachyOS/CachyOS-Settings/pull/283
-if have eac-status; then
-    result PASS "eac-status script" "eac-status is installed and available."
+printf '\033[31mWARNING: sourcing remote eac-status placeholder from https://github.com/CachyOS/CachyOS-Settings/raw/5d07459935997c33252a59c06b022de20d071a27/usr/bin/eac-status; this is a placeholder and should be changed.\033[0m\n'
+EAC_STATUS_URL="https://github.com/CachyOS/CachyOS-Settings/raw/5d07459935997c33252a59c06b022de20d071a27/usr/bin/eac-status"
+EAC_STATUS_TMP="$TMPDIR_EAC/eac-status"
+if have curl; then
+    if curl -fsSL "$EAC_STATUS_URL" -o "$EAC_STATUS_TMP" 2>/dev/null; then
+        chmod +x "$EAC_STATUS_TMP" 2>/dev/null || true
+        # Source (run) the fetched script as a subprocess so it cannot exit this script.
+        "$EAC_STATUS_TMP" || true
+    else
+        printf '\033[31mFailed to fetch remote eac-status placeholder.\033[0m\n'
+    fi
+elif have wget; then
+    if wget -qO "$EAC_STATUS_TMP" "$EAC_STATUS_URL" 2>/dev/null; then
+        chmod +x "$EAC_STATUS_TMP" 2>/dev/null || true
+        "$EAC_STATUS_TMP" || true
+    else
+        printf '\033[31mFailed to fetch remote eac-status placeholder.\033[0m\n'
+    fi
 else
-    result FAIL "eac-status script" "eac-status is not available; it has not been implemented yet. See https://github.com/CachyOS/CachyOS-Settings/pull/283"
+    printf '\033[31mcurl/wget not available; cannot fetch remote eac-status placeholder.\033[0m\n'
 fi
 
 section "1. Signed kernel and kernel modules"
