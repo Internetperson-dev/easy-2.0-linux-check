@@ -179,8 +179,19 @@ EAC_KERNEL_IMAGE=0
 echo "Running kernel: $(uname -r)"
 echo "linux-cachyos-eac package installed: $([ "$EAC_PKG_INSTALLED" -eq 1 ] && echo yes || echo no)"
 echo "EAC kernel image present: $([ "$EAC_KERNEL_IMAGE" -eq 1 ] && echo yes || echo no)"
+# Detect CachyOS
+IS_CACHYOS=0
+if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    if [ "${ID:-}" = "cachyos" ] || printf '%s' "${NAME:-}${PRETTY_NAME:-}" | grep -qi cachyos; then
+        IS_CACHYOS=1
+    fi
+fi
+
 if [ "$EAC_KERNEL_RUNNING" -eq 1 ]; then
     result PASS "CachyOS EAC kernel" "Running kernel is linux-cachyos-eac."
+elif [ "$IS_CACHYOS" -eq 1 ]; then
+    result FAIL "CachyOS EAC kernel" "Running on CachyOS but not using linux-cachyos-eac. This kernel is not available yet, but is required for EAC v2. See https://github.com/CachyOS/wiki/pull/650/changes/cea244a7712a6e1248d0afdd51e6b95a729a801c"
 elif [ "$EAC_PKG_INSTALLED" -eq 1 ] || [ "$EAC_KERNEL_IMAGE" -eq 1 ]; then
     result WARN "CachyOS EAC kernel" "linux-cachyos-eac is present but not the running kernel; reboot into the EAC boot entry to use it."
 else
