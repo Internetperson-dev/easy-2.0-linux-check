@@ -14,7 +14,6 @@ chmod +x eac-linux-v2-check.sh
 ```
 
 
-```
 > Let’s go through the system requirements for EAC Linux v2 one by one. We expect to iterate on these requirements over time, and we appreciate feedback from developers and distribution maintainers to help refine them.
 > 1. Signed Kernel & Kernel Modules
 > 
@@ -51,7 +50,7 @@ chmod +x eac-linux-v2-check.sh
 > 8. Linux Security Module BPF
 >> 
 > The LSM BPF feature enables eBPF programs to use Linux Security Module hooks for granular access control and monitoring. This enables anti-cheat to restrict other processes from reading or writing protected game process memory without needing a kernel module, as well as monitor for cheats loaded in different ways. We require the BPF LSM to be loaded and active.
-```
+
 
 \- [Awesome Gaming on Linux Without Cheating, Epic Games](https://onlineservices.epicgames.com/news/introducing-easy-anti-cheat-linux-v2)
 
