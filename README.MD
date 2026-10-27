@@ -14,7 +14,7 @@ chmod +x eac-linux-v2-check.sh
 ```
 
 
-
+```
 > Let’s go through the system requirements for EAC Linux v2 one by one. We expect to iterate on these requirements over time, and we appreciate feedback from developers and distribution maintainers to help refine them.
 > 1. Signed Kernel & Kernel Modules
 > 
