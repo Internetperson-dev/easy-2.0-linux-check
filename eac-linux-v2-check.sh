@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+
+# https://github.com/CachyOS/linux-cachyos/pull/1084
+# https://github.com/CachyOS/wiki/pull/650
+# https://github.com/CachyOS/CachyOS-Settings/pull/283
+
+
 # EAC Linux v2 / CachyOS preflight (diagnostic only)
 # Based on Epic's EAC Linux v2 requirements and the CachyOS EAC *draft*.
 # No installations, configuration edits, reboots, key enrollment, or remote code.
